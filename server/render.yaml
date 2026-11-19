@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: tihiy-kontur-server
+    runtime: node
+    rootDir: server
+    plan: free
+    buildCommand: npm install
+    startCommand: node index.js
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: DP_KEY
+        sync: false
+      - key: AUTH_DEV
+        value: "0"
+      - key: PUBLIC_URL
+        sync: false
