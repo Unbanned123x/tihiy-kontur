@@ -6,6 +6,7 @@ const http = require('http');
 const crypto = require('crypto');
 const { handleAuth } = require('./auth');
 const store = require('./store');
+const { handleProfile } = require('./profile');
 
 const PORT = process.env.PORT || 8080;
 const rooms = new Map();       // code -> { clients: Set<Client>, host: Client }
@@ -139,6 +140,7 @@ function refreshDonations() {
 const server = http.createServer(async (req, res) => {
   const _url = new URL(req.url, 'http://localhost');
   if (await handleAuth(req, res, _url)) return;
+  if (await handleProfile(req, res, _url)) return;
   if (req.url.startsWith('/api/donations')) {
     const fresh = Date.now() - donationsCache.at < 60000;
     const send = body => {
