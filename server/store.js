@@ -39,6 +39,13 @@ const SCHEMA_PROFILES = `CREATE TABLE IF NOT EXISTS profiles (
   updated TIMESTAMPTZ DEFAULT NOW()
 )`;
 
+const SCHEMA_PAYMENTS = `CREATE TABLE IF NOT EXISTS payments (
+  dp_id TEXT PRIMARY KEY,
+  email TEXT NOT NULL,
+  amount NUMERIC NOT NULL,
+  created TIMESTAMPTZ DEFAULT NOW()
+)`;
+
 const SCHEMA = `CREATE TABLE IF NOT EXISTS users (
   email TEXT PRIMARY KEY,
   salt TEXT NOT NULL,
@@ -53,6 +60,7 @@ async function init() {
   if (NEON_URL) {
     await neon(SCHEMA);
     await neon(SCHEMA_PROFILES);
+    await neon(SCHEMA_PAYMENTS);
     console.log('[db] Neon Postgres');
   } else {
     console.log('[db] файл users.json (DATABASE_URL не задан)');
@@ -141,4 +149,23 @@ async function saveProfile(email, data) {
   saveFile();
 }
 
-module.exports = { init, getUser, createUser, updateUser, getProfile, saveProfile, backing: () => (NEON_URL ? 'neon' : 'file') };
+async function seenPayments() {
+  if (NEON_URL) {
+    const rows = await neon('SELECT dp_id FROM payments', []);
+    return new Set(rows.map(r => String(r.dp_id)));
+  }
+  return new Set(Object.keys(fileDb.payments || {}));
+}
+
+async function recordPayment(dpId, email, amount) {
+  if (NEON_URL) {
+    await neon('INSERT INTO payments (dp_id, email, amount) VALUES ($1, $2, $3) ON CONFLICT (dp_id) DO NOTHING',
+      [String(dpId), email, amount]);
+    return;
+  }
+  if (!fileDb.payments) fileDb.payments = {};
+  fileDb.payments[String(dpId)] = { email, amount };
+  saveFile();
+}
+
+module.exports = { init, getUser, createUser, updateUser, getProfile, saveProfile, seenPayments, recordPayment, backing: () => (NEON_URL ? 'neon' : 'file') };
