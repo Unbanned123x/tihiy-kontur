@@ -52,16 +52,15 @@ function newSecret() {
   return s;
 }
 
-async function sendMail(email, subject, link) {
-  const key = process.env.RESEND_API_KEY || '';
-  const from = process.env.MAIL_FROM || 'Тихий контур <onboarding@resend.dev>';
+function parseFrom(raw) {
+  const v = String(raw || '').trim();
+  const m = v.match(/^(.*)<([^>]+)>\s*$/);
+  if (m) return { name: (m[1].trim() || 'Тихий контур'), email: m[2].trim() };
+  return { name: 'Тихий контур', email: v || 'no-reply@example.com' };
+}
 
-  if (!key) {
-    console.log('[mail:dev] to=' + email + ' | ' + subject + ' | ' + link);
-    return { dev: true };
-  }
-
-  const html = [
+function mailHtml(link) {
+  return [
     '<div style="font-family:Segoe UI,system-ui,sans-serif;background:#05080d;color:#dbe7f3;padding:32px">',
     '<h2 style="margin:0 0 12px;color:#eaf4ff">Тихий контур</h2>',
     '<p style="color:#8fa6bd;font-size:14px;line-height:1.6">Подтвердите почту, чтобы аккаунт заработал.</p>',
@@ -72,33 +71,66 @@ async function sendMail(email, subject, link) {
     '<p style="color:#5f7186;font-size:12px">Если вы не регистрировались — просто проигнорируйте письмо.</p>',
     '</div>'
   ].join('');
+}
 
-  try {
-    const r = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: {
-        'authorization': 'Bearer ' + key,
-        'content-type': 'application/json'
-      },
-      body: JSON.stringify({
-        from: from,
-        to: [email],
-        subject: subject,
-        html: html,
-        text: 'Подтверждение аккаунта «Тихий контур»: ' + link
-      })
-    });
-    const data = await r.json().catch(() => ({}));
-    if (!r.ok) {
-      console.log('[mail:resend-error]', r.status, JSON.stringify(data).slice(0, 200));
+async function sendMail(email, subject, link) {
+  const brevo = process.env.BREVO_API_KEY || '';
+  const resend = process.env.RESEND_API_KEY || '';
+  const from = parseFrom(process.env.MAIL_FROM);
+  const html = mailHtml(link);
+  const text = 'Подтверждение аккаунта «Тихий контур»: ' + link;
+
+  if (brevo) {
+    try {
+      const r = await fetch('https://api.brevo.com/v3/smtp/email', {
+        method: 'POST',
+        headers: { 'api-key': brevo, 'content-type': 'application/json', accept: 'application/json' },
+        body: JSON.stringify({
+          sender: from,
+          to: [{ email: email }],
+          subject: subject,
+          htmlContent: html,
+          textContent: text
+        })
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        console.log('[mail:brevo-error]', r.status, JSON.stringify(data).slice(0, 220));
+        return { error: true };
+      }
+      console.log('[mail:brevo] sent to=' + email + ' id=' + (data.messageId || '?'));
+      return { id: data.messageId };
+    } catch (e) {
+      console.log('[mail:brevo-crash]', e.message);
       return { error: true };
     }
-    console.log('[mail:resend] sent to=' + email + ' id=' + (data.id || '?'));
-    return { id: data.id };
-  } catch (e) {
-    console.log('[mail:resend-crash]', e.message);
-    return { error: true };
   }
+
+  if (resend) {
+    try {
+      const r = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: { authorization: 'Bearer ' + resend, 'content-type': 'application/json' },
+        body: JSON.stringify({
+          from: (from.name ? from.name + ' <' + from.email + '>' : from.email),
+          to: [email], subject: subject, html: html, text: text
+        })
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        console.log('[mail:resend-error]', r.status, JSON.stringify(data).slice(0, 200));
+        return { error: true };
+      }
+      console.log('[mail:resend] sent to=' + email + ' id=' + (data.id || '?'));
+      return { id: data.id };
+    } catch (e) {
+      console.log('[mail:resend-crash]', e.message);
+      return { error: true };
+    }
+  }
+
+  console.log('[mail:dev] to=' + email + ' | ' + subject + ' | ' + link);
+  return { dev: true };
 }
 
 function json(res, code, obj) {
