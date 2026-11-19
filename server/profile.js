@@ -93,6 +93,28 @@ async function handleProfile(req, res, url) {
 }
 
 
+
+// ---- магазин: пакеты монет ----
+const PACKS = [
+  { id: 'p500',   rub: 49,   credits: 500,   bonus: 0,    case: true  },
+  { id: 'p1200',  rub: 99,   credits: 1100,  bonus: 10,   case: false },
+  { id: 'p2600',  rub: 199,  credits: 2400,  bonus: 20,   case: false },
+  { id: 'p6000',  rub: 399,  credits: 5200,  bonus: 30,   case: false },
+  { id: 'p13000', rub: 699,  credits: 11000, bonus: 50,   case: true  }
+];
+const VIP = [0, 499, 1499, 2999, 5999, 9999]; // пороги в рублях -> уровень
+
+function vipLevel(spent) {
+  let lvl = 0;
+  for (let i = 0; i < VIP.length; i++) if (spent >= VIP[i]) lvl = i;
+  return lvl;
+}
+
+function packByAmount(rub) {
+  const sorted = PACKS.slice().sort((a, b) => Math.abs(a.rub - rub) - Math.abs(b.rub - rub));
+  return Math.abs(sorted[0].rub - rub) <= 5 ? sorted[0] : null;
+}
+
 // ---- донат: проверка платежа и начисление кредитов ----
 const MIN_DONATION = 49;       // рублей
 const CREDITS_PER_MIN = 500;   // 49 ₽ = 500 кредитов
@@ -113,15 +135,11 @@ async function handleClaim(req, res) {
   if (!s) { json(res, 401, { error: 'unauthorized' }); return true; }
 
   const rows = await fetchDonations();
-  if (!rows.length) {
-    json(res, 200, { ok: true, credited: 0, credits: 0, bonusCase: false, note: 'no_donations' });
-    return true;
-  }
-
   const seen = await store.seenPayments();
   const email = s.email;
   let credited = 0;
-  let bonus = false;
+  let bonusCase = false;
+  let spent = 0;
 
   for (const t of rows) {
     const id = String(t.id || '');
@@ -129,18 +147,24 @@ async function handleClaim(req, res) {
     const msg = String(t.what || '');
     const payer = String(t.payer || '');
     if (!msg.toLowerCase().includes(email) && payer.toLowerCase() !== email) continue;
+
     const amount = Number(t.sum || 0);
     if (!Number.isFinite(amount) || amount < MIN_DONATION) continue;
 
-    credited += Math.round(amount * CREDITS_PER_RUBLE);
-    bonus = true; // первый успешный платёж даёт бонусный кейс
+    const pack = packByAmount(amount);
+    const units = pack ? pack.credits : Math.round(amount * CREDITS_PER_RUBLE);
+    credited += units;
+    spent += amount;
+    if (pack && pack.case) bonusCase = true;
     await store.recordPayment(id, email, amount);
   }
 
   let profile = (await store.getProfile(email)) || Object.assign({}, EMPTY);
   if (credited > 0) {
     profile.credits = Math.max(0, Math.min(1e9, (profile.credits || 0) + credited));
-    if (!profile.bonusCaseUsed) profile.bonusCase = true;
+    profile.spent = Math.max(0, Math.min(1e9, (profile.spent || 0) + spent));
+    if (!profile.bonusCaseUsed && bonusCase) profile.bonusCase = true;
+    profile.vip = vipLevel(profile.spent || 0);
     await store.saveProfile(email, profile);
   }
 
@@ -148,11 +172,13 @@ async function handleClaim(req, res) {
     ok: true,
     credited,
     credits: profile.credits || 0,
+    spent: profile.spent || 0,
+    vip: profile.vip || 0,
     bonusCase: !!profile.bonusCase,
-    minDonation: MIN_DONATION,
-    creditsPerMin: CREDITS_PER_MIN
+    packs: PACKS,
+    minDonation: MIN_DONATION
   });
   return true;
 }
 
-module.exports = { handleProfile, handleClaim, sanitize };
+module.exports = { handleProfile, handleClaim, sanitize, PACKS, vipLevel };
