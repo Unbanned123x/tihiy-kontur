@@ -1,42 +1,21 @@
 // Аутентификация «Тихого контура»: регистрация, подтверждение почты, TOTP-2FA, сессии.
-// Без внешних зависимостей. Пользователи хранятся в users.json рядом с этим файлом.
-//
-// Отладочная почта: если SMTP не настроен, письмо не отправляется, а ссылка
-// подтверждения пишется в лог сервера и возвращается в ответе (только при AUTH_DEV=1).
+// Пользователи — в Postgres (Neon) или users.json, см. store.js.
 
 const crypto = require('crypto');
-const fs = require('fs');
-const path = require('path');
+const store = require('./store');
 
-const STORE = path.join(__dirname, 'users.json');
 const SESSION_TTL = 7 * 24 * 3600 * 1000;
-
-let db = { users: {} };
-try { db = JSON.parse(fs.readFileSync(STORE, 'utf8')); } catch (e) { db = { users: {} }; }
-
-const sessions = new Map();   // token -> { email, at }
-const challenges = new Map(); // challenge -> { email, at }
-const pending = new Map();    // confirmToken -> { email, at }
-
-function save() {
-  const tmp = STORE + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify(db, null, 2));
-  fs.renameSync(tmp, STORE);
-}
+const sessions = new Map();
+const challenges = new Map();
+const pending = new Map();
 
 function hash(password, salt) {
   return crypto.scryptSync(password, salt, 64).toString('hex');
 }
+function norm(email) { return String(email || '').trim().toLowerCase(); }
+function validEmail(e) { return /^[^@\s]+@[^@\s.]+\.[^@\s]{2,}$/.test(e); }
 
-function norm(email) {
-  return String(email || '').trim().toLowerCase();
-}
-
-function validEmail(email) {
-  return /^[^@\s]+@[^@\s.]+\.[^@\s]{2,}$/.test(email);
-}
-
-// ---- TOTP (RFC 6238, SHA1, 30 c, 6 цифр) ----
+// ---- TOTP (RFC 6238) ----
 function b32decode(str) {
   const A = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
   let bits = '';
@@ -49,7 +28,6 @@ function b32decode(str) {
   for (let i = 0; i + 8 <= bits.length; i += 8) out.push(parseInt(bits.slice(i, i + 8), 2));
   return Buffer.from(out);
 }
-
 function totp(secret, step) {
   const key = b32decode(secret);
   const counter = Math.floor((step === undefined ? Date.now() : step) / 30000);
@@ -61,15 +39,11 @@ function totp(secret, step) {
   const code = ((h[off] & 0x7f) << 24 | h[off + 1] << 16 | h[off + 2] << 8 | h[off + 3]) % 1000000;
   return String(code).padStart(6, '0');
 }
-
 function totpCheck(secret, code) {
   const now = Date.now();
-  for (let d = -1; d <= 1; d++) {
-    if (totp(secret, now + d * 30000) === String(code || '').trim()) return true;
-  }
+  for (let d = -1; d <= 1; d++) if (totp(secret, now + d * 30000) === String(code || '').trim()) return true;
   return false;
 }
-
 function newSecret() {
   const A = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
   let s = '';
@@ -78,26 +52,22 @@ function newSecret() {
   return s;
 }
 
-// ---- почта ----
 async function sendMail(email, subject, text) {
-  const host = process.env.SMTP_HOST;
-  if (!host) {
+  if (!process.env.SMTP_HOST) {
     console.log('[mail:dev] to=' + email + ' | ' + subject + ' | ' + text);
     return { dev: true };
   }
-  // SMTP не реализуем руками: при наличии SMTP_URL используем fetch к API провайдера
-  console.log('[mail:not-implemented] SMTP_URL задан, но отправка не настроена');
+  console.log('[mail:not-implemented] SMTP задан, но отправка не настроена');
   return { dev: true };
 }
 
-// ---- ответы ----
-function json(res, code, obj, extraHeaders) {
-  res.writeHead(code, Object.assign({
+function json(res, code, obj) {
+  res.writeHead(code, {
     'content-type': 'application/json; charset=utf-8',
     'access-control-allow-origin': '*',
     'access-control-allow-headers': 'content-type, authorization',
     'access-control-allow-methods': 'GET, POST, OPTIONS'
-  }, extraHeaders || {}));
+  });
   res.end(JSON.stringify(obj));
 }
 
@@ -117,14 +87,19 @@ function sessionOf(req) {
   const s = sessions.get(token);
   if (!s) return null;
   if (Date.now() - s.at > SESSION_TTL) { sessions.delete(token); return null; }
-  return { token, email: s.email, user: db.users[s.email] };
+  return { token, email: s.email };
 }
 
 function publicUser(u) {
   return { email: u.email, confirmed: !!u.confirmed, totp: !!u.totpOn, created: u.created };
 }
 
-// ---- обработчик ----
+function newSession(email) {
+  const token = crypto.randomBytes(24).toString('hex');
+  sessions.set(token, { email, at: Date.now() });
+  return token;
+}
+
 async function handleAuth(req, res, url) {
   const p = url.pathname;
 
@@ -134,21 +109,12 @@ async function handleAuth(req, res, url) {
     const b = await readBody(req);
     const email = norm(b.email);
     const password = String(b.password || '');
-    if (!validEmail(email)) return json(res, 400, { error: 'bad_email' }), true;
-    if (password.length < 8) return json(res, 400, { error: 'weak_password' }), true;
-    if (db.users[email]) return json(res, 409, { error: 'exists' }), true;
+    if (!validEmail(email)) { json(res, 400, { error: 'bad_email' }); return true; }
+    if (password.length < 8) { json(res, 400, { error: 'weak_password' }); return true; }
+    if (await store.getUser(email)) { json(res, 409, { error: 'exists' }); return true; }
 
     const salt = crypto.randomBytes(16).toString('hex');
-    db.users[email] = {
-      email,
-      salt,
-      hash: hash(password, salt),
-      created: new Date().toISOString(),
-      confirmed: false,
-      totpSecret: null,
-      totpOn: false
-    };
-    save();
+    await store.createUser({ email, salt, hash: hash(password, salt) });
 
     const token = crypto.randomBytes(24).toString('hex');
     pending.set(token, { email, at: Date.now() });
@@ -158,86 +124,92 @@ async function handleAuth(req, res, url) {
 
     const out = { ok: true, needConfirm: true };
     if (process.env.AUTH_DEV === '1') out.devConfirmUrl = link;
-    return json(res, 200, out), true;
+    json(res, 200, out);
+    return true;
   }
 
   if (p === '/api/auth/confirm' && req.method === 'GET') {
-    const token = url.searchParams.get('token') || '';
-    const rec = pending.get(token);
-    if (!rec) return json(res, 400, { error: 'bad_token' }), true;
-    const u = db.users[rec.email];
-    if (!u) return json(res, 400, { error: 'no_user' }), true;
-    u.confirmed = true;
-    save();
-    pending.delete(token);
-    return json(res, 200, { ok: true, email: u.email }), true;
+    const rec = pending.get(url.searchParams.get('token') || '');
+    if (!rec) { json(res, 400, { error: 'bad_token' }); return true; }
+    const u = await store.getUser(rec.email);
+    if (!u) { json(res, 400, { error: 'no_user' }); return true; }
+    await store.updateUser(u.email, { confirmed: true });
+    pending.delete(url.searchParams.get('token'));
+    json(res, 200, { ok: true, email: u.email });
+    return true;
   }
 
   if (p === '/api/auth/login' && req.method === 'POST') {
     const b = await readBody(req);
     const email = norm(b.email);
-    const u = db.users[email];
-    if (!u) return json(res, 401, { error: 'bad_credentials' }), true;
-    if (hash(String(b.password || ''), u.salt) !== u.hash) return json(res, 401, { error: 'bad_credentials' }), true;
-    if (!u.confirmed) return json(res, 403, { error: 'need_confirm' }), true;
+    const u = await store.getUser(email);
+    if (!u) { json(res, 401, { error: 'bad_credentials' }); return true; }
+    if (hash(String(b.password || ''), u.salt) !== u.hash) { json(res, 401, { error: 'bad_credentials' }); return true; }
+    if (!u.confirmed) { json(res, 403, { error: 'need_confirm' }); return true; }
     if (u.totpOn) {
       const ch = crypto.randomBytes(16).toString('hex');
       challenges.set(ch, { email, at: Date.now() });
-      return json(res, 200, { ok: true, need2fa: true, challenge: ch }), true;
+      json(res, 200, { ok: true, need2fa: true, challenge: ch });
+      return true;
     }
-    const token = crypto.randomBytes(24).toString('hex');
-    sessions.set(token, { email, at: Date.now() });
-    return json(res, 200, { ok: true, token, user: publicUser(u) }), true;
+    json(res, 200, { ok: true, token: newSession(email), user: publicUser(u) });
+    return true;
   }
 
   if (p === '/api/auth/2fa/verify' && req.method === 'POST') {
     const b = await readBody(req);
     const rec = challenges.get(String(b.challenge || ''));
-    if (!rec) return json(res, 400, { error: 'bad_challenge' }), true;
-    const u = db.users[rec.email];
-    if (!u || !u.totpOn) return json(res, 400, { error: 'no_2fa' }), true;
-    if (!totpCheck(u.totpSecret, b.code)) return json(res, 401, { error: 'bad_code' }), true;
+    if (!rec) { json(res, 400, { error: 'bad_challenge' }); return true; }
+    const u = await store.getUser(rec.email);
+    if (!u || !u.totpOn) { json(res, 400, { error: 'no_2fa' }); return true; }
+    if (!totpCheck(u.totpSecret, b.code)) { json(res, 401, { error: 'bad_code' }); return true; }
     challenges.delete(b.challenge);
-    const token = crypto.randomBytes(24).toString('hex');
-    sessions.set(token, { email: rec.email, at: Date.now() });
-    return json(res, 200, { ok: true, token, user: publicUser(u) }), true;
+    json(res, 200, { ok: true, token: newSession(rec.email), user: publicUser(u) });
+    return true;
   }
 
   if (p === '/api/auth/2fa/setup' && req.method === 'POST') {
     const s = sessionOf(req);
-    if (!s) return json(res, 401, { error: 'unauthorized' }), true;
-    const u = s.user;
-    if (!u.totpSecret) { u.totpSecret = newSecret(); save(); }
+    if (!s) { json(res, 401, { error: 'unauthorized' }); return true; }
+    const u = await store.getUser(s.email);
+    if (!u) { json(res, 401, { error: 'unauthorized' }); return true; }
+    let secret = u.totpSecret;
+    if (!secret) { secret = newSecret(); await store.updateUser(u.email, { totpSecret: secret }); }
     const otpauth = 'otpauth://totp/TihiyKontur:' + encodeURIComponent(u.email)
-      + '?secret=' + u.totpSecret + '&issuer=TihiyKontur&digits=6&period=30';
-    return json(res, 200, { ok: true, secret: u.totpSecret, otpauth }), true;
+      + '?secret=' + secret + '&issuer=TihiyKontur&digits=6&period=30';
+    json(res, 200, { ok: true, secret, otpauth });
+    return true;
   }
 
   if (p === '/api/auth/2fa/enable' && req.method === 'POST') {
     const s = sessionOf(req);
-    if (!s) return json(res, 401, { error: 'unauthorized' }), true;
+    if (!s) { json(res, 401, { error: 'unauthorized' }); return true; }
     const b = await readBody(req);
-    const u = s.user;
-    if (!u.totpSecret) return json(res, 400, { error: 'no_secret' }), true;
-    if (!totpCheck(u.totpSecret, b.code)) return json(res, 401, { error: 'bad_code' }), true;
-    u.totpOn = true;
-    save();
-    return json(res, 200, { ok: true, user: publicUser(u) }), true;
+    const u = await store.getUser(s.email);
+    if (!u || !u.totpSecret) { json(res, 400, { error: 'no_secret' }); return true; }
+    if (!totpCheck(u.totpSecret, b.code)) { json(res, 401, { error: 'bad_code' }); return true; }
+    await store.updateUser(u.email, { totpOn: true });
+    json(res, 200, { ok: true, user: publicUser(Object.assign({}, u, { totpOn: true })) });
+    return true;
   }
 
   if (p === '/api/auth/me' && req.method === 'GET') {
     const s = sessionOf(req);
-    if (!s) return json(res, 401, { error: 'unauthorized' }), true;
-    return json(res, 200, { ok: true, user: publicUser(s.user) }), true;
+    if (!s) { json(res, 401, { error: 'unauthorized' }); return true; }
+    const u = await store.getUser(s.email);
+    if (!u) { json(res, 401, { error: 'unauthorized' }); return true; }
+    json(res, 200, { ok: true, user: publicUser(u) });
+    return true;
   }
 
   if (p === '/api/auth/logout' && req.method === 'POST') {
     const s = sessionOf(req);
     if (s) sessions.delete(s.token);
-    return json(res, 200, { ok: true }), true;
+    json(res, 200, { ok: true });
+    return true;
   }
 
   return false;
 }
 
-module.exports = { handleAuth, totp, totpCheck, sessionOf, db };
+module.exports = { handleAuth, totp, totpCheck, sessionOf, store };
