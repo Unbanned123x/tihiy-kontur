@@ -217,7 +217,7 @@
       return '<td' + (cls && cls[i] ? ' class="' + cls[i] + '"' : '') + '>' + c + '</td>';
     }).join('') + '</tr>';
   }
-  const DONATIONS_API = '';  // адрес сервера, например https://tihiy.onrender.com/api/donations
+  const DONATIONS_API = 'https://bikes-fish-quit-own.trycloudflare.com/api/donations';
   const source = DONATIONS_API || 'donations.json';
   fetch(source, { cache: 'no-store' })
     .then(function (r) { return r.ok ? r.json() : null; })
