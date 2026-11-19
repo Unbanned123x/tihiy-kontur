@@ -52,13 +52,53 @@ function newSecret() {
   return s;
 }
 
-async function sendMail(email, subject, text) {
-  if (!process.env.SMTP_HOST) {
-    console.log('[mail:dev] to=' + email + ' | ' + subject + ' | ' + text);
+async function sendMail(email, subject, link) {
+  const key = process.env.RESEND_API_KEY || '';
+  const from = process.env.MAIL_FROM || 'Тихий контур <onboarding@resend.dev>';
+
+  if (!key) {
+    console.log('[mail:dev] to=' + email + ' | ' + subject + ' | ' + link);
     return { dev: true };
   }
-  console.log('[mail:not-implemented] SMTP задан, но отправка не настроена');
-  return { dev: true };
+
+  const html = [
+    '<div style="font-family:Segoe UI,system-ui,sans-serif;background:#05080d;color:#dbe7f3;padding:32px">',
+    '<h2 style="margin:0 0 12px;color:#eaf4ff">Тихий контур</h2>',
+    '<p style="color:#8fa6bd;font-size:14px;line-height:1.6">Подтвердите почту, чтобы аккаунт заработал.</p>',
+    '<p style="margin:26px 0"><a href="' + link + '" style="display:inline-block;padding:14px 22px;',
+    'border-radius:12px;background:#35d0ff;color:#04121a;text-decoration:none;font-weight:700;',
+    'letter-spacing:.06em">ПОДТВЕРДИТЬ ПОЧТУ</a></p>',
+    '<p style="color:#5f7186;font-size:12px">Если кнопка не работает, откройте ссылку:<br>' + link + '</p>',
+    '<p style="color:#5f7186;font-size:12px">Если вы не регистрировались — просто проигнорируйте письмо.</p>',
+    '</div>'
+  ].join('');
+
+  try {
+    const r = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        'authorization': 'Bearer ' + key,
+        'content-type': 'application/json'
+      },
+      body: JSON.stringify({
+        from: from,
+        to: [email],
+        subject: subject,
+        html: html,
+        text: 'Подтверждение аккаунта «Тихий контур»: ' + link
+      })
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      console.log('[mail:resend-error]', r.status, JSON.stringify(data).slice(0, 200));
+      return { error: true };
+    }
+    console.log('[mail:resend] sent to=' + email + ' id=' + (data.id || '?'));
+    return { id: data.id };
+  } catch (e) {
+    console.log('[mail:resend-crash]', e.message);
+    return { error: true };
+  }
 }
 
 function json(res, code, obj) {
