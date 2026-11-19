@@ -33,6 +33,12 @@ async function neon(text, params) {
   return j.rows || [];
 }
 
+const SCHEMA_PROFILES = `CREATE TABLE IF NOT EXISTS profiles (
+  email TEXT PRIMARY KEY REFERENCES users(email) ON DELETE CASCADE,
+  data JSONB NOT NULL,
+  updated TIMESTAMPTZ DEFAULT NOW()
+)`;
+
 const SCHEMA = `CREATE TABLE IF NOT EXISTS users (
   email TEXT PRIMARY KEY,
   salt TEXT NOT NULL,
@@ -46,6 +52,7 @@ const SCHEMA = `CREATE TABLE IF NOT EXISTS users (
 async function init() {
   if (NEON_URL) {
     await neon(SCHEMA);
+    await neon(SCHEMA_PROFILES);
     console.log('[db] Neon Postgres');
   } else {
     console.log('[db] файл users.json (DATABASE_URL не задан)');
@@ -112,4 +119,26 @@ async function updateUser(email, patch) {
   saveFile();
 }
 
-module.exports = { init, getUser, createUser, updateUser, backing: () => (NEON_URL ? 'neon' : 'file') };
+async function getProfile(email) {
+  if (NEON_URL) {
+    const rows = await neon('SELECT data FROM profiles WHERE email = $1 LIMIT 1', [email]);
+    return rows[0] ? rows[0].data : null;
+  }
+  return (fileDb.profiles && fileDb.profiles[email]) || null;
+}
+
+async function saveProfile(email, data) {
+  if (NEON_URL) {
+    await neon(
+      'INSERT INTO profiles (email, data, updated) VALUES ($1, $2::jsonb, NOW()) ' +
+      'ON CONFLICT (email) DO UPDATE SET data = EXCLUDED.data, updated = NOW()',
+      [email, JSON.stringify(data)]
+    );
+    return;
+  }
+  if (!fileDb.profiles) fileDb.profiles = {};
+  fileDb.profiles[email] = data;
+  saveFile();
+}
+
+module.exports = { init, getUser, createUser, updateUser, getProfile, saveProfile, backing: () => (NEON_URL ? 'neon' : 'file') };
