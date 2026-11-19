@@ -81,6 +81,15 @@
   .gallery img{display:block;width:100%;height:auto}
   .gallery figcaption{padding:10px 12px;font-size:11.5px;line-height:1.45;color:var(--muted)}
 
+  .board{width:100%;border-collapse:collapse;font-size:13px}
+  .board th{text-align:left;padding:8px 10px;color:var(--muted);font:600 10px/1 ui-monospace,monospace;
+    letter-spacing:.16em;border-bottom:1px solid var(--line)}
+  .board td{padding:9px 10px;border-bottom:1px solid rgba(96,160,210,.08)}
+  .board .amt{text-align:right;color:var(--gold);font:700 12px/1 ui-monospace,monospace}
+  .board .rank{width:34px;color:var(--muted);font:700 11px/1 ui-monospace,monospace}
+  .board tr:first-child .rank{color:var(--gold)}
+  .board-empty{padding:14px 0;color:var(--muted);font-size:12.5px}
+
   .note{margin-top:14px;font-size:12px;line-height:1.6;color:var(--muted)}
 
   footer{padding:36px 0 60px;border-top:1px solid rgba(96,160,210,.1);color:#5f7186;font-size:12px;line-height:1.7}
@@ -171,6 +180,67 @@
 </section>
 
 
+
+<section id="board" style="display:none">
+  <div class="wrap">
+    <h2>Поддержали игру</h2>
+    <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(280px,1fr))">
+      <div class="card">
+        <b>Топ поддержавших</b>
+        <table class="board"><thead><tr><th class="rank">#</th><th>Имя</th><th style="text-align:right">Сумма</th></tr></thead>
+          <tbody id="boardTop"></tbody></table>
+        <div class="board-empty" id="boardTopEmpty">Пока никого — можно стать первым.</div>
+      </div>
+      <div class="card">
+        <b>Последние переводы</b>
+        <table class="board"><thead><tr><th>Имя</th><th>Дата</th><th style="text-align:right">Сумма</th></tr></thead>
+          <tbody id="boardLatest"></tbody></table>
+        <div class="board-empty" id="boardLatestEmpty">Здесь появятся последние донаты.</div>
+      </div>
+    </div>
+    <p class="note" id="boardUpdated"></p>
+  </div>
+</section>
+
+<script>
+(function () {
+  function esc(v) {
+    return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) {
+      return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+    });
+  }
+  function money(n) {
+    return Number(n || 0).toLocaleString('ru-RU') + ' ₽';
+  }
+  function row(cells, cls) {
+    return '<tr>' + cells.map(function (c, i) {
+      return '<td' + (cls && cls[i] ? ' class="' + cls[i] + '"' : '') + '>' + c + '</td>';
+    }).join('') + '</tr>';
+  }
+  fetch('donations.json', { cache: 'no-store' })
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (data) {
+      if (!data) return;
+      var top = Array.isArray(data.top) ? data.top.slice(0, 10) : [];
+      var latest = Array.isArray(data.latest) ? data.latest.slice(0, 8) : [];
+      if (!top.length && !latest.length) return;
+      var section = document.getElementById('board');
+      if (section) section.style.display = '';
+      var tb = document.getElementById('boardTop');
+      top.forEach(function (d, i) {
+        tb.insertAdjacentHTML('beforeend', row([i + 1, esc(d.name || 'Аноним'), money(d.amount)], ['rank', '', 'amt']));
+      });
+      if (top.length) document.getElementById('boardTopEmpty').style.display = 'none';
+      var lb = document.getElementById('boardLatest');
+      latest.forEach(function (d) {
+        lb.insertAdjacentHTML('beforeend', row([esc(d.name || 'Аноним'), esc(d.date || ''), money(d.amount)], ['', '', 'amt']));
+      });
+      if (latest.length) document.getElementById('boardLatestEmpty').style.display = 'none';
+      if (data.updated) document.getElementById('boardUpdated').textContent = 'Обновлено: ' + data.updated;
+    })
+    .catch(function () {});
+})();
+</script>
 
 <section>
   <div class="wrap">
