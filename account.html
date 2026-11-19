@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Аккаунт — Тихий контур</title>
+<style>
+  :root{--bg:#05080d;--panel:#0d1620;--line:rgba(96,160,210,.18);--text:#dbe7f3;--muted:#8fa6bd;--accent:#35d0ff;--good:#2ee6a8;--bad:#ff6b6b}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:"Segoe UI",system-ui,sans-serif;line-height:1.55}
+  .wrap{max-width:460px;margin:0 auto;padding:40px 20px 80px}
+  h1{font-size:26px;margin:0 0 6px;letter-spacing:-.02em}
+  .sub{color:var(--muted);font-size:13px;margin-bottom:24px}
+  .tabs{display:flex;gap:8px;margin-bottom:18px}
+  .tab{flex:1;padding:11px;border-radius:12px;border:1px solid var(--line);background:rgba(13,22,32,.8);
+    color:var(--muted);font:800 11px/1 ui-monospace,monospace;letter-spacing:.14em;cursor:pointer}
+  .tab.on{color:#04121a;background:linear-gradient(180deg,#5fe4ff,#159ec9);border-color:transparent}
+  label{display:block;font:700 9px/1 ui-monospace,monospace;letter-spacing:.18em;color:var(--muted);margin:14px 0 6px}
+  input{width:100%;padding:13px 14px;border-radius:12px;border:1px solid var(--line);
+    background:rgba(6,11,16,.9);color:var(--text);font-size:15px;outline:none}
+  input:focus{border-color:rgba(53,208,255,.6)}
+  button.go{width:100%;margin-top:18px;padding:15px;border-radius:13px;border:none;cursor:pointer;
+    font:800 12px/1 ui-monospace,monospace;letter-spacing:.12em;color:#04121a;
+    background:linear-gradient(180deg,#5fe4ff,#159ec9);box-shadow:0 6px 0 #0a5c78,0 10px 20px rgba(0,0,0,.4)}
+  button.go:active{transform:translateY(4px);box-shadow:0 1px 0 #0a5c78}
+  button.ghost{width:100%;margin-top:10px;padding:13px;border-radius:12px;cursor:pointer;
+    background:transparent;border:1px solid var(--line);color:var(--text);
+    font:800 11px/1 ui-monospace,monospace;letter-spacing:.1em}
+  .msg{margin-top:14px;font-size:13px;min-height:20px}
+  .ok{color:var(--good)} .err{color:var(--bad)}
+  .card{margin-top:20px;padding:16px;border-radius:14px;border:1px solid var(--line);background:rgba(10,16,22,.7)}
+  .card b{display:block;margin-bottom:8px;font-size:13px}
+  .kv{display:flex;justify-content:space-between;font-size:13px;padding:5px 0;border-bottom:1px solid rgba(96,160,210,.08)}
+  .kv span:last-child{color:var(--accent)}
+  .secret{font:700 12px/1.6 ui-monospace,monospace;word-break:break-all;color:var(--gold,#ffd479);
+    background:rgba(0,0,0,.35);padding:10px;border-radius:8px;margin-top:8px}
+  .hint{font-size:12px;color:var(--muted);margin-top:10px}
+  a{color:var(--accent)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Аккаунт</h1>
+  <div class="sub">Нужен для поддержки игры и будущего кооператива.</div>
+
+  <div id="authView">
+    <div class="tabs">
+      <button class="tab on" id="tabLogin">ВХОД</button>
+      <button class="tab" id="tabReg">РЕГИСТРАЦИЯ</button>
+    </div>
+
+    <div id="loginForm">
+      <label>ПОЧТА</label>
+      <input id="loginEmail" type="email" autocomplete="email" placeholder="you@example.com">
+      <label>ПАРОЛЬ</label>
+      <input id="loginPass" type="password" autocomplete="current-password" placeholder="••••••••">
+      <button class="go" id="doLogin">ВОЙТИ</button>
+      <div class="msg" id="loginMsg"></div>
+
+      <div id="twofaBox" style="display:none">
+        <label>КОД ИЗ ПРИЛОЖЕНИЯ</label>
+        <input id="twofaCode" inputmode="numeric" maxlength="6" placeholder="000000">
+        <button class="go" id="do2fa">ПОДТВЕРДИТЬ</button>
+        <div class="msg" id="twofaMsg"></div>
+      </div>
+    </div>
+
+    <div id="regForm" style="display:none">
+      <label>ПОЧТА</label>
+      <input id="regEmail" type="email" autocomplete="email" placeholder="you@example.com">
+      <label>ПАРОЛЬ (МИНИМУМ 8 СИМВОЛОВ)</label>
+      <input id="regPass" type="password" autocomplete="new-password" placeholder="••••••••">
+      <label>ПОВТОРИТЕ ПАРОЛЬ</label>
+      <input id="regPass2" type="password" autocomplete="new-password" placeholder="••••••••">
+      <button class="go" id="doReg">СОЗДАТЬ АККАУНТ</button>
+      <div class="msg" id="regMsg"></div>
+    </div>
+  </div>
+
+  <div id="profileView" style="display:none">
+    <div class="card">
+      <b>ПРОФИЛЬ</b>
+      <div class="kv"><span>Почта</span><span id="pEmail">—</span></div>
+      <div class="kv"><span>Почта подтверждена</span><span id="pConfirm">—</span></div>
+      <div class="kv"><span>Двухфакторная</span><span id="pTotp">—</span></div>
+    </div>
+
+    <div class="card" id="totpSetup" style="display:none">
+      <b>ВКЛЮЧЕНИЕ 2FA</b>
+      <div class="hint">Добавьте этот секрет в Google Authenticator или Aegis, затем введите код.</div>
+      <div class="secret" id="totpSecret"></div>
+      <div class="hint" id="totpUrl"></div>
+      <label>КОД ИЗ ПРИЛОЖЕНИЯ</label>
+      <input id="enableCode" inputmode="numeric" maxlength="6" placeholder="000000">
+      <button class="go" id="doEnable">ВКЛЮЧИТЬ 2FA</button>
+      <div class="msg" id="enableMsg"></div>
+    </div>
+
+    <button class="ghost" id="doSetup" style="display:none">ВКЛЮЧИТЬ 2FA</button>
+    <button class="ghost" id="doLogout">ВЫЙТИ</button>
+    <div class="msg" id="profileMsg"></div>
+  </div>
+
+  <div class="hint" style="margin-top:26px"><a href="index.html">← На главную</a></div>
+</div>
+
+<script>
+(function () {
+  var API = 'https://bikes-fish-quit-own.trycloudflare.com';
+  var TOKEN_KEY = 'tk-auth-token';
+  var token = localStorage.getItem(TOKEN_KEY) || '';
+  var challenge = '';
+
+  function el(id) { return document.getElementById(id); }
+  function msg(id, text, ok) {
+    var e = el(id);
+    if (!e) return;
+    e.textContent = text || '';
+    e.className = 'msg ' + (ok ? 'ok' : 'err');
+  }
+  function api(path, body, method) {
+    return fetch(API + path, {
+      method: method || (body ? 'POST' : 'GET'),
+      headers: Object.assign({ 'content-type': 'application/json' },
+        token ? { authorization: 'Bearer ' + token } : {}),
+      body: body ? JSON.stringify(body) : undefined
+    }).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (d) {
+        return { status: r.status, data: d };
+      });
+    });
+  }
+
+  function showAuth() {
+    el('authView').style.display = '';
+    el('profileView').style.display = 'none';
+  }
+  function showProfile(user) {
+    el('authView').style.display = 'none';
+    el('profileView').style.display = '';
+    el('pEmail').textContent = user.email;
+    el('pConfirm').textContent = user.confirmed ? 'да' : 'нет';
+    el('pTotp').textContent = user.totp ? 'включена' : 'выключена';
+    el('doSetup').style.display = user.totp ? 'none' : '';
+    if (user.totp) el('totpSetup').style.display = 'none';
+  }
+
+  function loadMe() {
+    if (!token) { showAuth(); return; }
+    api('/api/auth/me').then(function (r) {
+      if (r.status === 200 && r.data.user) showProfile(r.data.user);
+      else { token = ''; localStorage.removeItem(TOKEN_KEY); showAuth(); }
+    }).catch(showAuth);
+  }
+
+  el('tabLogin').addEventListener('click', function () {
+    el('tabLogin').classList.add('on'); el('tabReg').classList.remove('on');
+    el('loginForm').style.display = ''; el('regForm').style.display = 'none';
+  });
+  el('tabReg').addEventListener('click', function () {
+    el('tabReg').classList.add('on'); el('tabLogin').classList.remove('on');
+    el('regForm').style.display = ''; el('loginForm').style.display = 'none';
+  });
+
+  el('doReg').addEventListener('click', function () {
+    var email = el('regEmail').value.trim();
+    var p1 = el('regPass').value, p2 = el('regPass2').value;
+    if (p1 !== p2) { msg('regMsg', 'ПАРОЛИ НЕ СОВПАДАЮТ', false); return; }
+    if (p1.length < 8) { msg('regMsg', 'ПАРОЛЬ КОРОЧЕ 8 СИМВОЛОВ', false); return; }
+    msg('regMsg', 'СОЗДАЁМ…', true);
+    api('/api/auth/register', { email: email, password: p1 }).then(function (r) {
+      if (r.status === 200) {
+        if (r.data.devConfirmUrl) {
+          msg('regMsg', 'АККАУНТ СОЗДАН. ПОДТВЕРДИТЕ ПОЧТУ: ' + r.data.devConfirmUrl, true);
+        } else {
+          msg('regMsg', 'АККАУНТ СОЗДАН. ПРОВЕРЬТЕ ПОЧТУ.', true);
+        }
+      } else if (r.status === 409) msg('regMsg', 'ТАКАЯ ПОЧТА УЖЕ ЗАНЯТА', false);
+      else if (r.status === 400) msg('regMsg', 'ПРОВЕРЬТЕ ПОЧТУ И ПАРОЛЬ', false);
+      else msg('regMsg', 'ОШИБКА ' + r.status, false);
+    }).catch(function () { msg('regMsg', 'СЕРВЕР НЕДОСТУПЕН', false); });
+  });
+
+  el('doLogin').addEventListener('click', function () {
+    var email = el('loginEmail').value.trim();
+    var pass = el('loginPass').value;
+    msg('loginMsg', 'ПРОВЕРЯЕМ…', true);
+    api('/api/auth/login', { email: email, password: pass }).then(function (r) {
+      if (r.status === 200 && r.data.need2fa) {
+        challenge = r.data.challenge;
+        el('twofaBox').style.display = '';
+        msg('loginMsg', 'ВВЕДИТЕ КОД ИЗ ПРИЛОЖЕНИЯ', true);
+        return;
+      }
+      if (r.status === 200 && r.data.token) {
+        token = r.data.token;
+        localStorage.setItem(TOKEN_KEY, token);
+        showProfile(r.data.user);
+        return;
+      }
+      if (r.status === 403) msg('loginMsg', 'ПОЧТА НЕ ПОДТВЕРЖДЕНА', false);
+      else if (r.status === 401) msg('loginMsg', 'НЕВЕРНАЯ ПОЧТА ИЛИ ПАРОЛЬ', false);
+      else msg('loginMsg', 'ОШИБКА ' + r.status, false);
+    }).catch(function () { msg('loginMsg', 'СЕРВЕР НЕДОСТУПЕН', false); });
+  });
+
+  el('do2fa').addEventListener('click', function () {
+    api('/api/auth/2fa/verify', { challenge: challenge, code: el('twofaCode').value }).then(function (r) {
+      if (r.status === 200 && r.data.token) {
+        token = r.data.token;
+        localStorage.setItem(TOKEN_KEY, token);
+        el('twofaBox').style.display = 'none';
+        showProfile(r.data.user);
+      } else msg('twofaMsg', 'НЕВЕРНЫЙ КОД', false);
+    }).catch(function () { msg('twofaMsg', 'СЕРВЕР НЕДОСТУПЕН', false); });
+  });
+
+  el('doSetup').addEventListener('click', function () {
+    api('/api/auth/2fa/setup', {}).then(function (r) {
+      if (r.status === 200) {
+        el('totpSetup').style.display = '';
+        el('totpSecret').textContent = r.data.secret;
+        el('totpUrl').textContent = r.data.otpauth;
+      } else msg('profileMsg', 'ОШИБКА ' + r.status, false);
+    });
+  });
+
+  el('doEnable').addEventListener('click', function () {
+    api('/api/auth/2fa/enable', { code: el('enableCode').value }).then(function (r) {
+      if (r.status === 200) {
+        el('totpSetup').style.display = 'none';
+        msg('profileMsg', '2FA ВКЛЮЧЕНА', true);
+        loadMe();
+      } else msg('enableMsg', 'НЕВЕРНЫЙ КОД', false);
+    });
+  });
+
+  el('doLogout').addEventListener('click', function () {
+    api('/api/auth/logout', {}).then(function () {
+      token = '';
+      localStorage.removeItem(TOKEN_KEY);
+      showAuth();
+      msg('loginMsg', 'ВЫ ВЫШЛИ', true);
+    }).catch(function () {
+      token = '';
+      localStorage.removeItem(TOKEN_KEY);
+      showAuth();
+    });
+  });
+
+  loadMe();
+})();
+</script>
+</body>
+</html>
