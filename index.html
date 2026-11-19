@@ -25,11 +25,38 @@
   h1 span{color:var(--accent)}
   .lead{max-width:620px;font-size:clamp(14px,2.4vw,17px);line-height:1.6;color:var(--muted)}
   .cta{display:flex;gap:10px;flex-wrap:wrap;margin-top:26px}
-  .btn{display:inline-block;padding:14px 22px;border-radius:14px;font:800 12px/1 ui-monospace,monospace;
-    letter-spacing:.12em;border:1px solid transparent;cursor:pointer}
-  .btn.primary{background:linear-gradient(180deg,#45dcff,#159ec9);color:#04121a;
-    box-shadow:0 10px 30px rgba(53,208,255,.28)}
-  .btn.ghost{border-color:var(--line);color:var(--text);background:rgba(13,22,32,.7)}
+  .btn{position:relative;display:inline-block;padding:15px 24px;border-radius:14px;
+    font:800 12px/1 ui-monospace,monospace;letter-spacing:.12em;border:1px solid transparent;
+    cursor:pointer;text-align:center;overflow:hidden;
+    transition:transform .07s ease, box-shadow .07s ease, filter .15s ease;
+    transform:translateZ(0)}
+  .btn::after{content:"";position:absolute;left:0;right:0;top:0;height:45%;pointer-events:none;
+    background:linear-gradient(180deg,rgba(255,255,255,.42),rgba(255,255,255,0));
+    border-radius:14px 14px 40% 40%}
+  .btn.primary{color:#04121a;
+    background:linear-gradient(180deg,#5fe4ff 0%,#2fc3ea 45%,#0f8fbb 100%);
+    border-color:rgba(4,20,28,.45);
+    box-shadow:
+      0 6px 0 #0a5c78,
+      0 10px 18px rgba(0,0,0,.45),
+      0 14px 34px rgba(53,208,255,.22),
+      inset 0 2px 0 rgba(255,255,255,.65),
+      inset 0 -4px 8px rgba(4,40,56,.35)}
+  .btn.ghost{color:var(--text);
+    background:linear-gradient(180deg,#1b2b3a 0%,#13202c 55%,#0b141c 100%);
+    border-color:rgba(120,170,210,.28);
+    box-shadow:
+      0 6px 0 #060d13,
+      0 10px 18px rgba(0,0,0,.5),
+      inset 0 2px 0 rgba(255,255,255,.14),
+      inset 0 -4px 8px rgba(0,0,0,.45)}
+  .btn:hover{filter:brightness(1.06)}
+  .btn:active{transform:translateY(5px);
+    box-shadow:
+      0 1px 0 rgba(0,0,0,.6),
+      0 3px 8px rgba(0,0,0,.45),
+      inset 0 3px 10px rgba(0,0,0,.35)}
+  @media (prefers-reduced-motion: reduce){.btn{transition:none}}
   .shot{margin:-10px auto 0;display:block;max-width:300px;width:70%;border-radius:22px;
     border:1px solid var(--line);box-shadow:0 40px 90px rgba(0,0,0,.7)}
 
@@ -72,7 +99,7 @@
       нож в спину и свет, который можно выключить выстрелом.</p>
     <div class="cta">
       <a class="btn primary" href="tihiy-kontur-3.9.7.apk" download>СКАЧАТЬ APK</a>
-      <a class="btn ghost" href="https://donatepay.ru/don/1544284" target="_blank" rel="noopener">ПОДДЕРЖАТЬ DONATEPAY</a>
+      <a class="btn ghost" href="https://donatepay.ru/don/1544284">ПОДДЕРЖАТЬ DONATEPAY</a>
       
     </div>
   </div>
