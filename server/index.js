@@ -155,6 +155,22 @@ const server = http.createServer(async (req, res) => {
     refreshDonations().then(send).catch(() => send(donationsCache.body));
     return;
   }
+  if (req.url === '/api/status') {
+    res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'access-control-allow-origin': '*' });
+    res.end(JSON.stringify({
+      ok: true,
+      db: store.backing(),
+      mail: {
+        resendKey: !!process.env.RESEND_API_KEY,
+        from: process.env.MAIL_FROM || 'onboarding@resend.dev',
+        publicUrl: process.env.PUBLIC_URL || null,
+        authDev: process.env.AUTH_DEV === '1'
+      },
+      donatePayKey: !!process.env.DP_KEY
+    }));
+    return;
+  }
+
   if (req.url === '/health') {
     res.writeHead(200, { 'content-type': 'application/json' });
     res.end(JSON.stringify({ ok: true, rooms: rooms.size, players: clients.size }));
