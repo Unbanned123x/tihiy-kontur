@@ -5,6 +5,7 @@
 const http = require('http');
 const crypto = require('crypto');
 const { handleAuth } = require('./auth');
+const store = require('./store');
 
 const PORT = process.env.PORT || 8080;
 const rooms = new Map();       // code -> { clients: Set<Client>, host: Client }
@@ -217,6 +218,8 @@ server.on('upgrade', (req, socket) => {
   socket.on('close', () => { leaveRoom(client); clients.delete(client); });
   socket.on('error', () => { leaveRoom(client); clients.delete(client); });
 });
+
+store.init().catch(e => console.error('[db] init fail:', e.message));
 
 server.listen(PORT, '0.0.0.0', () => {
   console.log('TIHIY KONTUR server on http://0.0.0.0:' + PORT);
