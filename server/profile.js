@@ -85,7 +85,74 @@ async function handleProfile(req, res, url) {
     return true;
   }
 
+  if (p === '/api/donations/claim' && req.method === 'POST') {
+    return await handleClaim(req, res);
+  }
+
   return false;
 }
 
-module.exports = { handleProfile, sanitize };
+
+// ---- донат: проверка платежа и начисление кредитов ----
+const MIN_DONATION = 49;       // рублей
+const CREDITS_PER_MIN = 500;   // 49 ₽ = 500 кредитов
+const CREDITS_PER_RUBLE = CREDITS_PER_MIN / MIN_DONATION;
+
+async function fetchDonations() {
+  const key = process.env.DP_KEY || '';
+  if (!key) return [];
+  const url = 'https://donatepay.ru/api/v1/transactions?access_token=' + encodeURIComponent(key)
+    + '&type=donation&limit=100&order=desc';
+  const r = await fetch(url, { headers: { 'User-Agent': 'tihiy-kontur', Accept: 'application/json' } });
+  const j = await r.json().catch(() => ({}));
+  return Array.isArray(j.data) ? j.data : [];
+}
+
+async function handleClaim(req, res) {
+  const s = sessionOf(req);
+  if (!s) { json(res, 401, { error: 'unauthorized' }); return true; }
+
+  const rows = await fetchDonations();
+  if (!rows.length) {
+    json(res, 200, { ok: true, credited: 0, credits: 0, bonusCase: false, note: 'no_donations' });
+    return true;
+  }
+
+  const seen = await store.seenPayments();
+  const email = s.email;
+  let credited = 0;
+  let bonus = false;
+
+  for (const t of rows) {
+    const id = String(t.id || '');
+    if (!id || seen.has(id)) continue;
+    const msg = String(t.what || '');
+    const payer = String(t.payer || '');
+    if (!msg.toLowerCase().includes(email) && payer.toLowerCase() !== email) continue;
+    const amount = Number(t.sum || 0);
+    if (!Number.isFinite(amount) || amount < MIN_DONATION) continue;
+
+    credited += Math.round(amount * CREDITS_PER_RUBLE);
+    bonus = true; // первый успешный платёж даёт бонусный кейс
+    await store.recordPayment(id, email, amount);
+  }
+
+  let profile = (await store.getProfile(email)) || Object.assign({}, EMPTY);
+  if (credited > 0) {
+    profile.credits = Math.max(0, Math.min(1e9, (profile.credits || 0) + credited));
+    if (!profile.bonusCaseUsed) profile.bonusCase = true;
+    await store.saveProfile(email, profile);
+  }
+
+  json(res, 200, {
+    ok: true,
+    credited,
+    credits: profile.credits || 0,
+    bonusCase: !!profile.bonusCase,
+    minDonation: MIN_DONATION,
+    creditsPerMin: CREDITS_PER_MIN
+  });
+  return true;
+}
+
+module.exports = { handleProfile, handleClaim, sanitize };
